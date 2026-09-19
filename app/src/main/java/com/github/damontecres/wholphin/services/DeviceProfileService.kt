@@ -58,6 +58,7 @@ class DeviceProfileService
                                 mediaTest = mediaCodecCapabilitiesTest,
                                 maxBitrate = newConfig.maxBitrate,
                                 isAC3Enabled = newConfig.overrides.ac3Supported,
+                                isDTSEnabled = newConfig.overrides.dtsSupported,
                                 downMixAudio = newConfig.overrides.downmixStereo,
                                 assDirectPlay = newConfig.overrides.assPlaybackMode != AssPlaybackMode.ASS_TRANSCODE,
                                 pgsDirectPlay = newConfig.overrides.directPlayPgs,

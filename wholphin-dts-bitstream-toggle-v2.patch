@@ -1,0 +1,158 @@
+diff --git a/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreference.kt b/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreference.kt
+index 43d2d53..8b3412f 100644
+--- a/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreference.kt
++++ b/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreference.kt
+@@ -404,6 +404,20 @@ sealed interface AppPreference<Pref, T> {
+                 summaryOff = R.string.disabled,
+             )
+ 
++        val DtsSupported =
++            AppSwitchPreference<AppPreferences>(
++                title = R.string.dts_supported,
++                defaultValue = true,
++                getter = { it.playbackPreferences.overrides.dtsSupported },
++                setter = { prefs, value ->
++                    prefs.updatePlaybackOverrides {
++                        dtsSupported = value
++                    }
++                },
++                summaryOn = R.string.enabled,
++                summaryOff = R.string.disabled,
++            )
++
+         val DownMixStereo =
+             AppSwitchPreference<AppPreferences>(
+                 title = R.string.downmix_stereo,
+@@ -1168,6 +1182,7 @@ private val ExoPlayerSettings =
+         AppPreference.FfmpegPreference,
+         AppPreference.DownMixStereo,
+         AppPreference.Ac3Supported,
++        AppPreference.DtsSupported,
+         AppPreference.AssSubtitleMode,
+         AppPreference.DirectPlayPgs,
+         AppPreference.DirectPlayDoviProfile7,
+diff --git a/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreferencesSerializer.kt b/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreferencesSerializer.kt
+index c6dcd8e..8aa8ce9 100644
+--- a/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreferencesSerializer.kt
++++ b/app/src/main/java/com/github/damontecres/wholphin/preferences/AppPreferencesSerializer.kt
+@@ -62,6 +62,7 @@ class AppPreferencesSerializer
+                                         .newBuilder()
+                                         .apply {
+                                             ac3Supported = AppPreference.Ac3Supported.defaultValue
++                                            dtsSupported = AppPreference.DtsSupported.defaultValue
+                                             downmixStereo = AppPreference.DownMixStereo.defaultValue
+ //                                            directPlayAss = AppPreference.DirectPlayAss.defaultValue
+                                             directPlayPgs = AppPreference.DirectPlayPgs.defaultValue
+diff --git a/app/src/main/java/com/github/damontecres/wholphin/services/AppUpgradeHandler.kt b/app/src/main/java/com/github/damontecres/wholphin/services/AppUpgradeHandler.kt
+index 4910110..072bef0 100644
+--- a/app/src/main/java/com/github/damontecres/wholphin/services/AppUpgradeHandler.kt
++++ b/app/src/main/java/com/github/damontecres/wholphin/services/AppUpgradeHandler.kt
+@@ -442,5 +442,15 @@ class AppUpgradeHandler
+                     }
+                 }
+             }
++
++            if (previous.isEqualOrBefore(Version.fromString("1.0.8-1-g0"))) {
++                // New dtsSupported override defaults to false in the proto (unset), but previous versions
++                // always treated DTS as supported, so preserve that behavior for existing installs
++                appPreferences.updateData {
++                    it.updatePlaybackOverrides {
++                        dtsSupported = AppPreference.DtsSupported.defaultValue
++                    }
++                }
++            }
+         }
+     }
+diff --git a/app/src/main/java/com/github/damontecres/wholphin/services/DeviceProfileService.kt b/app/src/main/java/com/github/damontecres/wholphin/services/DeviceProfileService.kt
+index 29df802..6adf9f5 100644
+--- a/app/src/main/java/com/github/damontecres/wholphin/services/DeviceProfileService.kt
++++ b/app/src/main/java/com/github/damontecres/wholphin/services/DeviceProfileService.kt
+@@ -58,6 +58,7 @@ class DeviceProfileService
+                                 mediaTest = mediaCodecCapabilitiesTest,
+                                 maxBitrate = newConfig.maxBitrate,
+                                 isAC3Enabled = newConfig.overrides.ac3Supported,
++                                isDTSEnabled = newConfig.overrides.dtsSupported,
+                                 downMixAudio = newConfig.overrides.downmixStereo,
+                                 assDirectPlay = newConfig.overrides.assPlaybackMode != AssPlaybackMode.ASS_TRANSCODE,
+                                 pgsDirectPlay = newConfig.overrides.directPlayPgs,
+diff --git a/app/src/main/java/com/github/damontecres/wholphin/util/profile/DeviceProfileUtils.kt b/app/src/main/java/com/github/damontecres/wholphin/util/profile/DeviceProfileUtils.kt
+index d2efeb3..15073e6 100644
+--- a/app/src/main/java/com/github/damontecres/wholphin/util/profile/DeviceProfileUtils.kt
++++ b/app/src/main/java/com/github/damontecres/wholphin/util/profile/DeviceProfileUtils.kt
+@@ -65,6 +65,7 @@ fun createDeviceProfile(
+     mediaTest: MediaCodecCapabilitiesTest,
+     maxBitrate: Int,
+     isAC3Enabled: Boolean,
++    isDTSEnabled: Boolean,
+     downMixAudio: Boolean,
+     assDirectPlay: Boolean,
+     pgsDirectPlay: Boolean,
+@@ -79,15 +80,31 @@ fun createDeviceProfile(
+                 downmixSupportedAudioCodecs
+             }
+ 
+-            !isAC3Enabled -> {
++            else -> {
+                 supportedAudioCodecs
+-                    .filterNot { it == Codec.Audio.EAC3 || it == Codec.Audio.AC3 }
++                    .filterNot { !isAC3Enabled && (it == Codec.Audio.EAC3 || it == Codec.Audio.AC3) }
++                    .filterNot { !isDTSEnabled && (it == Codec.Audio.DTS || it == Codec.Audio.DCA) }
+                     .toTypedArray()
+             }
++        }
+ 
+-            else -> {
+-                supportedAudioCodecs
++    // When DTS bitstreaming is disabled, DTS is removed from allowedAudioCodecs above, so it can no
++    // longer direct play/copy and must be transcoded. Restrict the transcoding target to a single
++    // preferred codec (EAC3, falling back to AC3) rather than just passing the full allowed codec list
++    // through: Jellyfin's server-side codec selection when transcoding does not reliably honor
++    // TranscodingProfile audio codec list order (see https://github.com/jellyfin/jellyfin-roku/pull/1299),
++    // and in practice picks AAC over AC3/EAC3 if AAC is present anywhere in the list. Forcing a single
++    // codec (the same approach used above for preferAc3ForSurround) is what actually works, and takes
++    // effect regardless of Jellyfin's own "Preferred transcode audio codec" user setting.
++    val transcodeAudioCodecs =
++        if (!isDTSEnabled && !downMixAudio) {
++            when {
++                isAC3Enabled && Codec.Audio.EAC3 in allowedAudioCodecs -> arrayOf(Codec.Audio.EAC3)
++                isAC3Enabled && Codec.Audio.AC3 in allowedAudioCodecs -> arrayOf(Codec.Audio.AC3)
++                else -> allowedAudioCodecs
+             }
++        } else {
++            allowedAudioCodecs
+         }
+ 
+     val supportsHevc = mediaTest.supportsHevc()
+@@ -160,7 +177,7 @@ fun createDeviceProfile(
+             if (supportsHevc) videoCodec(Codec.Video.HEVC)
+             videoCodec(Codec.Video.H264)
+ 
+-            audioCodec(*allowedAudioCodecs)
++            audioCodec(*transcodeAudioCodecs)
+ 
+             copyTimestamps = false
+             enableSubtitlesInManifest = true
+diff --git a/app/src/main/proto/WholphinDataStore.proto b/app/src/main/proto/WholphinDataStore.proto
+index 98698f7..f072530 100644
+--- a/app/src/main/proto/WholphinDataStore.proto
++++ b/app/src/main/proto/WholphinDataStore.proto
+@@ -57,6 +57,7 @@ message PlaybackOverrides{
+   bool direct_play_dolby_vision_e_l = 6;
+   bool decode_av1 = 7;
+   AssPlaybackMode ass_playback_mode = 8;
++  bool dts_supported = 9;
+ }
+ 
+ message PlaybackPreferences {
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index cff98ad..096ea91 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -321,6 +321,7 @@
+     <string name="pref_key_update_last_check" translatable="false">preference.update.lastTimestamp</string>
+ 
+     <string name="ac3_supported">Device supports AC3/Dolby Digital</string>
++    <string name="dts_supported">Device supports DTS bitstreaming</string>
+     <string name="advanced_settings">Advanced Settings</string>
+     <string name="advanced_ui">Advanced UI</string>
+     <string name="app_theme">Application Theme</string>

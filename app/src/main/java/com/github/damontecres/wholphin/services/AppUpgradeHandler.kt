@@ -442,5 +442,15 @@ class AppUpgradeHandler
                     }
                 }
             }
+
+            if (previous.isEqualOrBefore(Version.fromString("1.0.8-1-g0"))) {
+                // New dtsSupported override defaults to false in the proto (unset), but previous versions
+                // always treated DTS as supported, so preserve that behavior for existing installs
+                appPreferences.updateData {
+                    it.updatePlaybackOverrides {
+                        dtsSupported = AppPreference.DtsSupported.defaultValue
+                    }
+                }
+            }
         }
     }

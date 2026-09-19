@@ -65,6 +65,7 @@ fun createDeviceProfile(
     mediaTest: MediaCodecCapabilitiesTest,
     maxBitrate: Int,
     isAC3Enabled: Boolean,
+    isDTSEnabled: Boolean,
     downMixAudio: Boolean,
     assDirectPlay: Boolean,
     pgsDirectPlay: Boolean,
@@ -79,15 +80,31 @@ fun createDeviceProfile(
                 downmixSupportedAudioCodecs
             }
 
-            !isAC3Enabled -> {
-                supportedAudioCodecs
-                    .filterNot { it == Codec.Audio.EAC3 || it == Codec.Audio.AC3 }
-                    .toTypedArray()
-            }
-
             else -> {
                 supportedAudioCodecs
+                    .filterNot { !isAC3Enabled && (it == Codec.Audio.EAC3 || it == Codec.Audio.AC3) }
+                    .filterNot { !isDTSEnabled && (it == Codec.Audio.DTS || it == Codec.Audio.DCA) }
+                    .toTypedArray()
             }
+        }
+
+    // When DTS bitstreaming is disabled, DTS is removed from allowedAudioCodecs above, so it can no
+    // longer direct play/copy and must be transcoded. Restrict the transcoding target to a single
+    // preferred codec (EAC3, falling back to AC3) rather than just passing the full allowed codec list
+    // through: Jellyfin's server-side codec selection when transcoding does not reliably honor
+    // TranscodingProfile audio codec list order (see https://github.com/jellyfin/jellyfin-roku/pull/1299),
+    // and in practice picks AAC over AC3/EAC3 if AAC is present anywhere in the list. Forcing a single
+    // codec (the same approach used above for preferAc3ForSurround) is what actually works, and takes
+    // effect regardless of Jellyfin's own "Preferred transcode audio codec" user setting.
+    val transcodeAudioCodecs =
+        if (!isDTSEnabled && !downMixAudio) {
+            when {
+                isAC3Enabled && Codec.Audio.EAC3 in allowedAudioCodecs -> arrayOf(Codec.Audio.EAC3)
+                isAC3Enabled && Codec.Audio.AC3 in allowedAudioCodecs -> arrayOf(Codec.Audio.AC3)
+                else -> allowedAudioCodecs
+            }
+        } else {
+            allowedAudioCodecs
         }
 
     val supportsHevc = mediaTest.supportsHevc()
@@ -160,7 +177,7 @@ fun createDeviceProfile(
             if (supportsHevc) videoCodec(Codec.Video.HEVC)
             videoCodec(Codec.Video.H264)
 
-            audioCodec(*allowedAudioCodecs)
+            audioCodec(*transcodeAudioCodecs)
 
             copyTimestamps = false
             enableSubtitlesInManifest = true

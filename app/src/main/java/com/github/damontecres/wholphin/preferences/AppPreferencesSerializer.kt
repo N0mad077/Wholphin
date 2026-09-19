@@ -62,6 +62,7 @@ class AppPreferencesSerializer
                                         .newBuilder()
                                         .apply {
                                             ac3Supported = AppPreference.Ac3Supported.defaultValue
+                                            dtsSupported = AppPreference.DtsSupported.defaultValue
                                             downmixStereo = AppPreference.DownMixStereo.defaultValue
 //                                            directPlayAss = AppPreference.DirectPlayAss.defaultValue
                                             directPlayPgs = AppPreference.DirectPlayPgs.defaultValue

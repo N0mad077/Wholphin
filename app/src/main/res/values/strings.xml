@@ -321,6 +321,7 @@
     <string name="pref_key_update_last_check" translatable="false">preference.update.lastTimestamp</string>
 
     <string name="ac3_supported">Device supports AC3/Dolby Digital</string>
+    <string name="dts_supported">Device supports DTS bitstreaming</string>
     <string name="advanced_settings">Advanced Settings</string>
     <string name="advanced_ui">Advanced UI</string>
     <string name="app_theme">Application Theme</string>

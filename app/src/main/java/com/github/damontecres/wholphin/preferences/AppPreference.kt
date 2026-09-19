@@ -404,6 +404,20 @@ sealed interface AppPreference<Pref, T> {
                 summaryOff = R.string.disabled,
             )
 
+        val DtsSupported =
+            AppSwitchPreference<AppPreferences>(
+                title = R.string.dts_supported,
+                defaultValue = true,
+                getter = { it.playbackPreferences.overrides.dtsSupported },
+                setter = { prefs, value ->
+                    prefs.updatePlaybackOverrides {
+                        dtsSupported = value
+                    }
+                },
+                summaryOn = R.string.enabled,
+                summaryOff = R.string.disabled,
+            )
+
         val DownMixStereo =
             AppSwitchPreference<AppPreferences>(
                 title = R.string.downmix_stereo,
@@ -1168,6 +1182,7 @@ private val ExoPlayerSettings =
         AppPreference.FfmpegPreference,
         AppPreference.DownMixStereo,
         AppPreference.Ac3Supported,
+        AppPreference.DtsSupported,
         AppPreference.AssSubtitleMode,
         AppPreference.DirectPlayPgs,
         AppPreference.DirectPlayDoviProfile7,
